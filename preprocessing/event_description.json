@@ -1,0 +1,83 @@
+{
+    "onset": {
+        "LongName": "Stimulus onset",
+        "Description": "Onset in seconds from first scan"
+    },
+    "duration": {
+        "LongName": "Stimulus duration",
+        "Description": "Duration of stimulus presentation in seconds"
+    },
+    "ID": {
+        "LongName": "Subject ID",
+        "Description": "Subject study ID - starting with 0 indicate control, 1 indicate case group"
+    },
+    "Age": {
+        "LongName": "Participant age",
+        "Description": "Participant age"
+    },
+    "Gender": {
+        "LongName": "Participant gender",
+        "Description": "Participant gender",
+        "Levels": {
+            "female": "Female",
+            "male": "Male",
+            "other": "Other"
+        }
+    },
+    "trial": {
+        "LongName": "Trial number",
+        "Description": "Trial number (0:100)"
+    },
+    "word": {
+        "LongName": "Stimulus noun",
+        "Description": "Stimulus nouns for this trial"
+    },
+    "choice": {
+        "LongName": "Choice of demonstrative",
+        "Description": "Choice of demonstrative, character (this) or (that)",
+        "Levels": {
+            "this": "Proximal demonstrative",
+            "that": "Distal demonstrative"
+        }
+    },
+    "response": {
+        "LongName": "Response button",
+        "Description": "Response button in color (y or b)",
+        "Levels":{
+            "b": "Left key press",
+            "y": "Right key press"
+        }
+    },
+    "rt": {
+        "LongName": "Response time",
+        "Description": "Response time from stimulus onset to key press in seconds, continuous"
+    },
+    "choice_order": {
+        "LongName": "Order of response options",
+        "Description": "Order of response options (left to right)",
+        "Levels":{
+            "0": "Left: this, right: that",
+            "1": "Left: that, right: this"
+        }
+    },
+    "block": {
+        "LongName": "Block number",
+        "Description": "Block number (1-3)"
+    },
+    "scan_task": {
+        "LongName": "Task name",
+        "Description": "Task name"
+    },
+    "group": {
+        "LongName": "Group subject belongs to",
+        "Description": "Group subject belongs to. Defined by presence or absence of depression diagnosis",
+        "Levels":{
+            "0": "Control group",
+            "1": "Depression group"
+        }
+    },
+    "series": {
+        "LongName": "MRI scan series number",
+        "Description": "Series number as defined by MRI scan in StormDb database - used to name the BIDS files"
+    }
+}
