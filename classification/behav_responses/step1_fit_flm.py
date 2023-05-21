@@ -8,6 +8,8 @@ from nilearn.image import load_img
 import matplotlib.pyplot as plt 
 from datetime import datetime
 
+#%%
+
 ###########################################################################################################
 #                                    Define sublist and data paths                                        #
 ###########################################################################################################
@@ -18,8 +20,11 @@ sublist = os.listdir(dir)
 sublist = [sub for sub in sublist if sub.startswith('s')]
 
 #Subjects to exclude 
-exclude = ['sub-0020','sub-0038','sub-0059', 'sub-0053', 'sub-0050', 'sub-0057', 'sub-0058', 'sub-0018', 'sub-0021', 'sub-0027']
+exclude = ['sub-0020','sub-0038','sub-0059', 'sub-0053', 'sub-0050', 'sub-0057', 'sub-0058', 'sub-0018', 'sub-0021', 'sub-0027', 'sub-0067']
 sublist = [sub for sub in sublist if not sub in exclude]
+
+#Crashed at some point, running the last 3 subjects 
+sublist = ['sub-0085','sub-0086','sub-0087']
 
 print('Fitting FL models to subjects: '+str(sublist))
 
@@ -33,6 +38,7 @@ print('Fitting FL models to subjects: '+str(sublist))
 #Sub-0018: (py-wrapper 6456709): missing event file for block 1, missing all physiological files, incomplete BOLD file for run 1
 #Sub-0021: (py-wrapper 6456710): no mask provided for intersection - fMRIprep failed - no files 
 #Sub-0027: (py-wrapper 6456711): no mask provided for intersection - fMRIprep failed - no files 
+#Sub-0067: missing eventfile for session 3 
 
 #Data specific params 
 space = 'MNI152NLin2009cAsym'
@@ -41,6 +47,9 @@ space = 'MNI152NLin2009cAsym'
 #                          Loop over subs and compute FL models and contrasts                             #
 ###########################################################################################################
 
+#Exclude subs already run
+completed = ['sub-0025']
+sublist = [sub for sub in sublist if sub not in completed]
 
 #Functional files 
 for sub in sublist: 
@@ -94,9 +103,11 @@ for sub in sublist:
         n=events[i].shape[0]
         #582 timeopints 
         t_fmri = np.linspace(0, 582,582,endpoint=False)
+
         # We have to create a dataframe with onsets/durations/trial_types
         trials = pd.DataFrame(events[i], columns=['onset', 'duration'])
-        trials.loc[:, 'trial_type'] = ['t_'+str(ii).zfill(3) + '_' + events[i]['choice'][ii-1]  for ii in range(1, n+1)]
+        #To string on resp, so nan responses are also kept as string 
+        trials.loc[:, 'trial_type'] = ['t_'+str(ii).zfill(3) + '_' + str(events[i]['choice'][ii-1]) for ii in range(1, n+1)]
 
         # lsa_dm = least squares all design matrix
         tbt_dm.append(make_first_level_design_matrix(
@@ -173,11 +184,11 @@ for sub in sublist:
         contrasts=np.pad(contrasts, ((0,0),(0,dif)),'constant')
         #print(contrasts.shape)
         for ii in range(N):
-            print('Computing contrast for trial ' + str(N+1))
+            print('Computing contrast for trial ' + str(ii+1))
             #Add a z-contrast image from each trial
-            z_maps.append(model[i].compute_contrast(contrasts[ii,], output_type='z_score'))
+            z_maps.append(model.compute_contrast(contrasts[ii,], output_type='z_score'))
             # Make a variable with condition labels for use in later classification
-            conditions_label.append(events[i]['choice'][ii])
+            conditions_label.append(str(events[i]['choice'][ii]))
     #       session_label.append(session)
 
     #Save models, design matrix, and zmaps 
