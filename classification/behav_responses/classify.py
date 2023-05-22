@@ -14,7 +14,7 @@ dirlist = os.listdir(dir)
 sublist = [sub[0:8] for sub in dirlist if 'zmaps' in sub]
 
 #For testing 
-sublist = ['sub-0025']
+#sublist = ['sub-0025']
 
 ###########################################################################################################
 #                           Loop through subjects, load zmaps, run classification                         #
@@ -107,12 +107,12 @@ for sub in sublist:
     start = datetime.now()
     searchlight.fit(X_train, y_train)
     end=datetime.now() 
-    print('Searchlight started:',start.strftime("%H:%M:%S"))
-    print('Searchlight ended:', end.strftime("%H:%M:%S"))
+    print('Searchlight started:',start.strftime("%Y-%m-%d %H:%M:%S"))
+    print('Searchlight ended:', end.strftime("%Y-%m-%d %H:%M:%S"))
 
     # Saving the objects:
     import pickle
-    f = open(os.path.join('/users/line/dct_fMRI_analysis/classification/behav_responses/output/searchlight_objects/'+f'{sub}_searchlight.pkl'))
+    f = open(os.path.join('/users/line/dct_fMRI_analysis/classification/behav_responses/output/searchlight_objects/'+f'{sub}_searchlight.pkl'),'wb')
     pickle.dump([searchlight], f)
     f.close()
 
