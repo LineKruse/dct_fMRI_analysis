@@ -223,6 +223,100 @@ yhat = model_enc.predict(input)
 print(yhat.shape)
 print(yhat)      
 
+
+
+###########################################################################################################
+#                              Transformer (BERT) based feature representations                           #
+###########################################################################################################
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+
+#Load text df and combine all words into one text sequence in one column 
+dir = os.getcwd()
+path = os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv')
+raw_resp = pd.read_csv(path, index_col=False)
+
+def generateList(lst1, lst2):
+    return [sub[item] for item in range(len(lst2))
+                      for sub in [lst1, lst2]]
+
+text_df = pd.DataFrame(columns=np.arange(0,1))
+columns = text_df.columns
+for i in range(0, raw_resp.shape[0]):
+    print(i)
+    l1 = [str(col) for col in raw_resp.loc[:,:'loan'].columns]
+    l2 = [str(resp) for resp in raw_resp.loc[:,:'loan'].iloc[i,:]]
+    text = generateList(l2, l1)
+    #text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
+    text = [" ".join(text)]
+    zipped = zip(columns, text)
+    output_dict = dict(zipped)
+    text_df = text_df.append(output_dict, ignore_index=True)
+
+text_df = text_df.rename(columns={0: "text"})
+
+#Add group labels
+raw_resp = pd.read_csv(os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv'), index_col=False)
+text_df['dep_group'] = raw_resp.dep_group
+
+#Label encoding 
+LE = LabelEncoder()
+text_df['label'] = LE.fit_transform(text_df['dep_group'])
+text_df.head()
+
+#Split into train-test (random seed to fit with split in classification pipeline)
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(text_df.text, text_df.label,
+                                                    stratify = text_df.label,
+                                                    test_size=0.3,
+                                                    random_state=42)
+
+#Generate text embeddings 
+import torch
+from transformers import AutoTokenizer, AutoModel
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+model = AutoModel.from_pretrained("distilbert-base-uncased").to(device)
+
+#Tokenize 
+tokenized_train = tokenizer(X_train.values.tolist(), padding = True, truncation = True, return_tensors="pt")
+tokenized_test = tokenizer(X_test.values.tolist(), padding = True, truncation = True, return_tensors="pt")
+
+print(tokenized_train.keys())
+
+#Move on device (GPU)
+tokenized_train = {k:torch.tensor(v).to(device) for k,v in tokenized_train.items()}
+tokenized_test = {k:torch.tensor(v).to(device) for k,v in tokenized_test.items()}
+
+#Get the text ([CLS]) hiddden states - run model 
+with torch.no_grad():
+  hidden_train = model(**tokenized_train) #dim : [batch_size(nr_sentences), tokens, emb_dim]
+  hidden_test = model(**tokenized_test)
+
+#get only the [CLS] hidden states
+cls_train = hidden_train.last_hidden_state[:,0,:]
+cls_test = hidden_test.last_hidden_state[:,0,:]
+
+cls_train_df = pd.DataFrame(cls_train.numpy())
+cls_test_df = pd.DataFrame(cls_test.numpy())
+
+cls_train_df['ID'] = raw_resp.ID
+cls_train_df['gender'] = raw_resp.gender
+cls_train_df['age'] = raw_resp.age
+cls_train_df['dep_group'] = raw_resp.dep_group
+cls_train_df['PHQ9_sum'] = raw_resp.PHQ9_sum
+
+cls_test_df['ID'] = raw_resp.ID
+cls_test_df['gender'] = raw_resp.gender
+cls_test_df['age'] = raw_resp.age
+cls_test_df['dep_group'] = raw_resp.dep_group
+cls_test_df['PHQ9_sum'] = raw_resp.PHQ9_sum
+
+cls_train_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/BERT_features_responses_train.csv'), index=False)
+cls_test_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/BERT_features_responses_test.csv'), index=False)
+
 ###########################################################################################################
 #                                    Distribution of PHQ9 sum scores by dep group                         #
 ###########################################################################################################
