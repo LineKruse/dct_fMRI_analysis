@@ -72,8 +72,7 @@ pca_resp['age'] = raw_resp.age
 pca_resp['dep_group'] = raw_resp.dep_group
 pca_resp['PHQ9_sum'] = raw_resp.PHQ9_sum
 
-pca_resp.to_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/features_dfs/pca_responses.csv')
-
+pca_resp.to_csv(os.path.join(dir, 'classification/dep_classification/features_dfs/pca_responses.csv'), index=False)
 
 ###########################################################################################################
 #                                       Word embedding representations                                    #
@@ -131,7 +130,9 @@ vec_df.to_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/f
 #Treated as natural language processing problem  
 
 #Create text representations for each subject 
-raw_resp = pd.read_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/features_dfs/raw_responses.csv', index_col=False)
+dir = os.getcwd()
+path = os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv')
+raw_resp = pd.read_csv(path, index_col=False)
 
 def generateList(lst1, lst2):
     return [sub[item] for item in range(len(lst2))
@@ -145,43 +146,71 @@ for i in range(0, raw_resp.shape[0]):
     l2 = [str(resp) for resp in raw_resp.loc[:,:'loan'].iloc[i,:]]
     text = generateList(l2, l1)
     text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
+    #text = [" ".join(text)]
     zipped = zip(columns, text)
     output_dict = dict(zipped)
     text_df = text_df.append(output_dict, ignore_index=True)
-     
-#One-hot encoding 
-#Encodes the sentence for each subject according to whehter a stim-resp combination is present 
-from category_encoders.one_hot import OneHotEncoder
-encoder = OneHotEncoder(handle_missing='value')
-text_enc = encoder.fit_transform(text_df)
-#Pad to similar length - not necessary, should have similar length 
 
-text_enc.to_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/features_dfs/one_hot_text_responses.csv')
+text_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index=False)
 
+#Trian LSTM autoencoder 
+from numpy import array
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Model
+from tensorflow.keras import regularizers
+from tensorflow.keras.layers import LSTM, Dropout, Dense, RepeatVector, TimeDistributed
+from tensorflow.keras.utils import plot_model
+from tensorflow.keras.preprocessing.text import one_hot
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras import optimizers
+from tensorflow import keras
 
-#Input to LSTM 
-#Use both embedding and LSTM layer to capture meaning
-from __future__ import print_function
-import keras
-from keras.datasets import mnist
-from keras.models import Sequential
-from keras.layers import Dense, Dropout, Flatten, Embedding, LSTM
-from keras.layers import Conv2D, MaxPooling2D
-#from keras import backend as K
-import matplotlib.pyplot as plt
+seq_list = []
+for i in range(0, text_df.shape[0]):
+   text = [str(w) for w in text_df.iloc[i,:]]
+   #text = ' '.join(text)
+   seq_list.append(text)
 
-embedding_vector_features=45
-model=Sequential()
-model.add(Embedding(voc_size,embedding_vector_features,input_length=sent_length))
-model.add(LSTM(128,input_shape=(embedded_docs.shape),activation='relu',return_sequences=True))
-model.add(Dropout(0.2))
-model.add(LSTM(128,activation='relu'))
-model.add(Dropout(0.2))
-model.add(Dense(32,activation='relu'))
-model.add(Dropout(0.2))
-model.add(Dense(4,activation='softmax'))
-model.compile(loss='sparse_categorical_crossentropy',optimizer='adam',metrics=['accuracy'])
-print(model.summary())
+#Integer encode text sequences 
+t = Tokenizer()
+t.fit_on_texts(seq_list)
+seq_encoded = t.texts_to_sequences(seq_list)
+seq_encoded_df = pd.DataFrame(seq_encoded)
+seq_encoded_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_encoded_responses.csv'), index=False)
+
+word_to_index_dict = t.index_word
+
+#Scale input 
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+input_scaled = scaler.fit_transform(seq_encoded_df)
+
+#3D input shape: samples (n sequences), timesteps (n words), features (n feature types - we have one: words)
+input = input_scaled.reshape(73, 293, 1)
+
+n_timesteps = input.shape[1]
+n_features = input.shape[2]
+
+#Define model and fit 
+model = Sequential()
+model.add(LSTM(100, activation='relu', input_shape=(n_timesteps, n_features)))
+model.add(RepeatVector(n_timesteps))
+model.add(LSTM(100, activation='relu', return_sequences=True))
+model.add(TimeDistributed(Dense(n_features)))
+opt = keras.optimizers.Adam(clipnorm=1.5)
+model.compile(optimizer=opt, loss='mse')
+
+#Train to reconstruct self 
+model.fit(input, input, epochs=300, verbose=1)
+
+#Connect the encoder LSTM as the output layer
+model_enc = Model(inputs=model.inputs, outputs=model.layers[0].output)
+
+#Get the feature vectors for the input sequences
+yhat = model_enc.predict(input)
+print(yhat.shape)
+print(yhat)      
 
 ###########################################################################################################
 #                                    Distribution of PHQ9 sum scores by dep group                         #
@@ -205,7 +234,7 @@ plt.legend(title='Group')
 plt.savefig('/users/line/dct_fMRI_analysis/classification/dep_classification/output/phq9_dist.png')
 
 
-# N in dep group with PHQ9 sum above threshold (10)
+#N in dep group with PHQ9 sum above threshold (10)
 x1 = raw_resp.loc[(raw_resp['dep_group']==1) & (raw_resp['PHQ9_sum']>9)] #n=27 
 # N in dep group with PHQ9 sum below threshold (10)
 x2 = raw_resp.loc[(raw_resp['dep_group']==1) & (raw_resp['PHQ9_sum']<10)] #n=3
