@@ -181,9 +181,17 @@ seq_encoded_df.to_csv(os.path.join(dir,'classification/dep_classification/featur
 
 word_to_index_dict = t.index_word
 
+#Ordinal encoder
+import category_encoders as ce 
+#ord_encoder = ce.OrdinalEncoder(handle_missing='value')
+#seq_encoded_df = ord_encoder.fit_transform(seq_list)
+#bin_encoder = ce.BinaryEncoder(handle_missing='value')
+#seq_encoded_df = bin_encoder.fit_transform(seq_list)
+
 #Scale input 
-from sklearn.preprocessing import StandardScaler
-scaler = StandardScaler()
+from sklearn.preprocessing import StandardScaler, RobustScaler
+scaler = StandardScaler() # Gives range (-0.9, 7.9)
+#scaler = RobustScaler() # Gives range (-1, 596)
 input_scaled = scaler.fit_transform(seq_encoded_df)
 
 #3D input shape: samples (n sequences), timesteps (n words), features (n feature types - we have one: words)
@@ -195,10 +203,13 @@ n_features = input.shape[2]
 #Define model and fit 
 model = Sequential()
 model.add(LSTM(100, activation='relu', input_shape=(n_timesteps, n_features)))
+#model.add(Dropout(0.1))
 model.add(RepeatVector(n_timesteps))
+#model.add(Dropout(0.1))
 model.add(LSTM(100, activation='relu', return_sequences=True))
+#model.add(Dropout(0.1))
 model.add(TimeDistributed(Dense(n_features)))
-opt = keras.optimizers.Adam(clipnorm=1.5)
+opt = keras.optimizers.Adam(clipnorm=1.)
 model.compile(optimizer=opt, loss='mse')
 
 #Train to reconstruct self 
