@@ -112,7 +112,7 @@ for sub in sublist:
 
     # Saving the objects:
     import pickle
-    f = open(os.path.join('/users/line/dct_fMRI_analysis/classification/behav_responses/output/searchlight_objects/'+f'{sub}_searchlight.pkl'),'wb')
+    f = open(os.path.join('/users/line/dct_fMRI_analysis/classification/behav_responses/output/searhlight_objects/'+f'{sub}_searchlight.pkl'),'wb')
     pickle.dump([searchlight], f)
     f.close()
 
