@@ -121,15 +121,15 @@ vec_df['PHQ9_sum'] = raw_resp.PHQ9_sum
 
 vec_df.to_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/features_dfs/embed_responses.csv')
 
-    
-###########################################################################################################
-#                                            Text features from LSTM                                      #
-###########################################################################################################
-#Treat all trials (stimulus and response) as one long sentence ("this cat that house that party this day...")
-#Apply LSTM to extract features from the text - use as input for classification
-#Treated as natural language processing problem  
 
-#Create text representations for each subject 
+###########################################################################################################
+#                              Transformer (BERT) based feature representations                           #
+###########################################################################################################
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+
+#Load text df and combine all words into one text sequence in one column 
 dir = os.getcwd()
 path = os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv')
 raw_resp = pd.read_csv(path, index_col=False)
@@ -138,90 +138,81 @@ def generateList(lst1, lst2):
     return [sub[item] for item in range(len(lst2))
                       for sub in [lst1, lst2]]
 
-text_df = pd.DataFrame(columns=np.arange(0,293))
+text_df = pd.DataFrame(columns=np.arange(0,1))
 columns = text_df.columns
 for i in range(0, raw_resp.shape[0]):
     print(i)
     l1 = [str(col) for col in raw_resp.loc[:,:'loan'].columns]
     l2 = [str(resp) for resp in raw_resp.loc[:,:'loan'].iloc[i,:]]
     text = generateList(l2, l1)
-    text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
-    #text = [" ".join(text)]
+    #text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
+    text = [" ".join(text)]
     zipped = zip(columns, text)
     output_dict = dict(zipped)
     text_df = text_df.append(output_dict, ignore_index=True)
 
-text_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index=False)
+text_df = text_df.rename(columns={0: "text"})
 
-#Trian LSTM autoencoder 
-from numpy import array
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.models import Model
-from tensorflow.keras import regularizers
-from tensorflow.keras.layers import LSTM, Dropout, Dense, RepeatVector, TimeDistributed
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras.preprocessing.text import one_hot
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras import optimizers
-from tensorflow import keras
+#Add group labels
+raw_resp = pd.read_csv(os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv'), index_col=False)
+text_df['dep_group'] = raw_resp.dep_group
 
-seq_list = []
-for i in range(0, text_df.shape[0]):
-   text = [str(w) for w in text_df.iloc[i,:]]
-   #text = ' '.join(text)
-   seq_list.append(text)
+#Label encoding 
+LE = LabelEncoder()
+text_df['label'] = LE.fit_transform(text_df['dep_group'])
+text_df.head()
 
-#Integer encode text sequences 
-t = Tokenizer()
-t.fit_on_texts(seq_list)
-seq_encoded = t.texts_to_sequences(seq_list)
-seq_encoded_df = pd.DataFrame(seq_encoded)
-seq_encoded_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_encoded_responses.csv'), index=False)
+#Split into train-test (random seed to fit with split in classification pipeline)
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(text_df.text, text_df.label,
+                                                    stratify = text_df.label,
+                                                    test_size=0.3,
+                                                    random_state=42)
 
-word_to_index_dict = t.index_word
+#Generate text embeddings 
+import torch
+from transformers import AutoTokenizer, AutoModel
 
-#Ordinal encoder
-import category_encoders as ce 
-#ord_encoder = ce.OrdinalEncoder(handle_missing='value')
-#seq_encoded_df = ord_encoder.fit_transform(seq_list)
-#bin_encoder = ce.BinaryEncoder(handle_missing='value')
-#seq_encoded_df = bin_encoder.fit_transform(seq_list)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+model = AutoModel.from_pretrained("distilbert-base-uncased").to(device)
 
-#Scale input 
-from sklearn.preprocessing import StandardScaler, RobustScaler
-scaler = StandardScaler() # Gives range (-0.9, 7.9)
-#scaler = RobustScaler() # Gives range (-1, 596)
-input_scaled = scaler.fit_transform(seq_encoded_df)
+#Tokenize 
+tokenized_train = tokenizer(X_train.values.tolist(), padding = True, truncation = True, return_tensors="pt")
+tokenized_test = tokenizer(X_test.values.tolist(), padding = True, truncation = True, return_tensors="pt")
 
-#3D input shape: samples (n sequences), timesteps (n words), features (n feature types - we have one: words)
-input = input_scaled.reshape(73, 293, 1)
+print(tokenized_train.keys())
 
-n_timesteps = input.shape[1]
-n_features = input.shape[2]
+#Move on device (GPU)
+tokenized_train = {k:torch.tensor(v).to(device) for k,v in tokenized_train.items()}
+tokenized_test = {k:torch.tensor(v).to(device) for k,v in tokenized_test.items()}
 
-#Define model and fit 
-model = Sequential()
-model.add(LSTM(100, activation='relu', input_shape=(n_timesteps, n_features)))
-#model.add(Dropout(0.1))
-model.add(RepeatVector(n_timesteps))
-#model.add(Dropout(0.1))
-model.add(LSTM(100, activation='relu', return_sequences=True))
-#model.add(Dropout(0.1))
-model.add(TimeDistributed(Dense(n_features)))
-opt = keras.optimizers.Adam(clipnorm=1.)
-model.compile(optimizer=opt, loss='mse')
+#Get the text ([CLS]) hiddden states - run model 
+with torch.no_grad():
+  hidden_train = model(**tokenized_train) #dim : [batch_size(nr_sentences), tokens, emb_dim]
+  hidden_test = model(**tokenized_test)
 
-#Train to reconstruct self 
-model.fit(input, input, epochs=300, verbose=1)
+#get only the [CLS] hidden states
+cls_train = hidden_train.last_hidden_state[:,0,:]
+cls_test = hidden_test.last_hidden_state[:,0,:]
 
-#Connect the encoder LSTM as the output layer
-model_enc = Model(inputs=model.inputs, outputs=model.layers[0].output)
+cls_train_df = pd.DataFrame(cls_train.numpy())
+cls_test_df = pd.DataFrame(cls_test.numpy())
 
-#Get the feature vectors for the input sequences
-yhat = model_enc.predict(input)
-print(yhat.shape)
-print(yhat)      
+cls_train_df['ID'] = raw_resp.ID
+cls_train_df['gender'] = raw_resp.gender
+cls_train_df['age'] = raw_resp.age
+cls_train_df['dep_group'] = raw_resp.dep_group
+cls_train_df['PHQ9_sum'] = raw_resp.PHQ9_sum
+
+cls_test_df['ID'] = raw_resp.ID
+cls_test_df['gender'] = raw_resp.gender
+cls_test_df['age'] = raw_resp.age
+cls_test_df['dep_group'] = raw_resp.dep_group
+cls_test_df['PHQ9_sum'] = raw_resp.PHQ9_sum
+
+cls_train_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/BERT_features_responses_train.csv'), index=False)
+cls_test_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/BERT_features_responses_test.csv'), index=False)
 
 ###########################################################################################################
 #                                    Distribution of PHQ9 sum scores by dep group                         #
