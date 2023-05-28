@@ -48,6 +48,7 @@ from tensorflow.keras import optimizers
 from tensorflow import keras
 
 #Define each timestep to include stim + response 
+dir = os.getcwd()
 text_df = pd.read_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index_col=False)
 text_df.isna().sum().sum() #39 nan 
 
@@ -118,24 +119,16 @@ n_timesteps = X_train.shape[1] #Should consider each trial to include word + res
 n_features = X_train.shape[2] #Word and response
 vocab_size = X_train.max()+1 #Vocab indices are in range(1,586), +1 because the embedding look-up is zero-indexed
 
-regularizers_list = [regularizers.L1L2(0.1,0.0), regularizers.L1L2(0.0,0.1), regularizers.L1L2(0.1,0.1)]
-
-train_loss = []
-train_acc = []
-train_f1 = []
-test_loss = []
-test_acc = []
-test_f1 = []
-
 l1_reg = np.arange(0,0.11,0.01)
 l2_reg = np.arange(0,0.11,0.01)
 
 #Hyperparameter tuning (l1l2 reg)
+import keras_tuner
 def build_model(hp):
     #Define model and fit 
     model = Sequential()
     model.add(Embedding(vocab_size, 100, input_length=n_timesteps))
-    model.add(LSTM(100, input_shape=(n_timesteps, n_features), bias_regularizer=regularizers.L1L2(hp.Float("l1", min_value=1e-2, max_value=1.5, sampling="log"),hp.Float("l1", min_value=1e-2, max_value=1.5, sampling="log"))))
+    model.add(LSTM(100, input_shape=(n_timesteps, n_features), bias_regularizer=regularizers.L1L2(hp.Float("l1", min_value=1e-2, max_value=1.5, sampling="log"), hp.Float("l2", min_value=1e-2, max_value=1.5, sampling="log"))))
     #model.add(LSTM(100, input_shape=(n_timesteps, n_features)))
     model.add(Dense(n_features, activation='sigmoid'))
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
@@ -147,26 +140,45 @@ def build_model(hp):
 #Check model build works 
 build_model(keras_tuner.HyperParameters())
 
+X_train_1 = X_train[:36,:,:]
+X_train_2 = X_train[36:,:,:]
+y_train_1 = y_train[:36]
+y_train_2 = y_train[36:]
+
 #Use random search tuner 
-import keras_tuner
 tuner = keras_tuner.RandomSearch(
     hypermodel=build_model,
     objective="val_accuracy",
     max_trials=3,
     executions_per_trial=2,
-    overwrite=True,
-    directory=os.path.join(dir, "classification"),
-    project_name="dep_classification",
+    overwrite=False,
+    directory=os.path.join(dir), 
+    project_name='lstm_hyperparam_tuning'
 )
+tuner.search_space_summary()
 
+#Start search (does not respect class_weight arguments)
+tuner.search(X_train_1, y_train_1, epochs=300, validation_data=(X_train_2, y_train_2))
 
+#Extract and build best model 
+models = tuner.get_best_models(num_models=1)
+best_model = models[0]
+# Build the model.
+# Needed for `Sequential` without specified `input_shape`.
+model = best_model.build()
+best_model.summary() 
+
+#Get hyperparams of best model 
+best_hp = tuner.get_best_hyperparameters()
+best_l1 = best_hp[0].values['l1'] #0.02
+best_l2 = best_hp[0].values['l2'] #0.42
 
 #------------------------Evaluate on train and test set-------------------------#
-train_eval = model.evaluate(X_train, y_train)
-test_eval = model.evaluate(X_test, y_test)
+train_eval = best_model.evaluate(X_train, y_train)
+test_eval = best_model.evaluate(X_test, y_test)
 
-train_pred = np.transpose(model.predict(X_train))[0]
-test_pred = np.transpose(model.predict(X_test))[0]
+train_pred = np.transpose(best_model.predict(X_train))[0]
+test_pred = np.transpose(best_model.predict(X_test))[0]
 
 yhat_train = list(map(lambda x: 1 if x>0.5 else 0, train_pred))
 yhat_test = list(map(lambda x: 1 if x>0.5 else 0, test_pred))
@@ -184,6 +196,9 @@ embed_weights = embed_weights.iloc[296:,:] #Get the weights corresponding to our
 #test_acc.append(test_eval[1])
 #test_f1.append(f1_test)
 
+
+#------------------------ Do permtutation tests -------------------------#
+#----------------------(on acc and feature importances) -------------------------#
 
 
 
