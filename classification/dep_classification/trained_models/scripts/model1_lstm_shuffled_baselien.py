@@ -1,6 +1,15 @@
 ###########################################################################################################
 #                                            Text features from LSTM                                      #
 ###########################################################################################################
+
+
+
+############
+############ Identical to model1, but trained on shuffled labels to get baseline 
+############
+
+
+
 #Treat all trials (stimulus and response) as one long sentence ("this cat that house that party this day...")
 #Apply LSTM to extract features from the text - use as input for classification
 #Treated as natural language processing problem  
@@ -52,6 +61,11 @@ X_train, X_test, y_train, y_test = train_test_split(input, labels,
 class_weights = compute_class_weight(class_weight='balanced', classes=[0,1], y=labels)
 class_weights = dict(zip([0,1], class_weights))
 
+
+#------------------------- Randomly shuffle training labels----------------------#
+from sklearn.utils import shuffle
+y_train = shuffle(y_train, random_state=42)
+
 #-------------------------- Define model and tune hyperparam ------------------------------#
 
 n_timesteps = X_train.shape[1] #Should consider each trial to include word + response 
@@ -77,7 +91,7 @@ y_train_1 = y_train[:36]
 y_train_2 = y_train[36:]
 
 #Use random search tuner 
-tuner = keras_tuner.RandomSearch(
+tuner_random = keras_tuner.RandomSearch(
     hypermodel=build_model,
     objective="val_accuracy",
     max_trials=3,
@@ -85,15 +99,15 @@ tuner = keras_tuner.RandomSearch(
     executions_per_trial=2,
     overwrite=False,
     directory=os.path.join(dir), 
-    project_name='lstm_hyperparam_tuning'
+    project_name='lstm_hyperparam_tuning_random'
 )
-tuner.search_space_summary()
+tuner_random.search_space_summary()
 
 #Start search (does not respect class_weight arguments)
-tuner.search(X_train_1, y_train_1, epochs=300, validation_data=(X_train_2, y_train_2))
+tuner_random.search(X_train_1, y_train_1, epochs=300, validation_data=(X_train_2, y_train_2))
 
 #Extract and build best model 
-models = tuner.get_best_models(num_models=1)
+models = tuner_random.get_best_models(num_models=1)
 best_model = models[0]
 
 # Build the model
@@ -101,9 +115,9 @@ best_model.build()
 best_model.summary() 
 
 #Get hyperparams of best model 
-best_hp = tuner.get_best_hyperparameters()
-best_l1 = best_hp[0].values['l1'] #0.86
-best_l2 = best_hp[0].values['l2'] #0.06
+best_hp = tuner_random.get_best_hyperparameters()
+best_l1 = best_hp[0].values['l1'] #0.25
+best_l2 = best_hp[0].values['l2'] #0.01
 
 #-------------------- Cross validation on best hyperparams -----------------#
 #                           (select best model)                             #
@@ -111,19 +125,21 @@ best_l2 = best_hp[0].values['l2'] #0.06
 #as they already need to be run several times for training. Rather, input a validation_data= argument to the 
 #.fit() function that trains the model. 
 
-""" def get_model_name(k):
+def get_model_name(k):
     return 'model_'+str(k)+'.h5'
 
 VALIDATION_ACCURACY = []
 VALIDATION_LOSS = []
+TRAIN_ACCURACY = []
+TRAIN_LOSS = []
 
-save_dir = os.path.join(dir,'saved_models/')
 fold_var = 1
 cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=42)
 epochs = 100
 Y=y_train
 
 for train_index, val_index in cv.split(np.zeros(len(Y)),Y):
+    print(f'----------------Running fold {fold_var}---------------')
     training_data = X_train[train_index]
     validation_data = X_train[val_index]
 
@@ -147,35 +163,35 @@ for train_index, val_index in cv.split(np.zeros(len(Y)),Y):
     model.build() #builds and compiles 
 
     # CREATE CALLBACKS
-    checkpoint = tensorflow.keras.callbacks.ModelCheckpoint(save_dir+get_model_name(fold_var), 
-                            monitor='val_accuracy', verbose=1, 
-                            save_best_only=True, mode='max')
-    callbacks_list = [checkpoint]
+    #checkpoint = tensorflow.keras.callbacks.ModelCheckpoint(save_dir+get_model_name(fold_var), 
+    #                        monitor='val_accuracy', verbose=1, 
+    #                        save_best_only=True, mode='max')
+    #callbacks_list = [checkpoint]
     # There can be other callbacks, but just showing one because it involves the model name
     # This saves the best model
     # FIT THE MODEL
     history = model.fit(training_data, training_y,
                 epochs=epochs,
-                callbacks=callbacks_list,
+                #callbacks=callbacks_list,
                 validation_data=(validation_data, validation_y))
 
     # LOAD BEST MODEL to evaluate the performance of the model
-    model.load_weights(os.path.join("saved_models/model_"+str(fold_var)+".h5"))
+    #model.load_weights(os.path.join("saved_models/model_"+str(fold_var)+".h5"))
+    results_train = model.evaluate(training_data, training_y)
+    results_train = dict(zip(model.metrics_names, results_train))
+    results_val = model.evaluate(validation_data, validation_y)
+    results_val = dict(zip(model.metrics_names,results_val))
 
-    results = model.evaluate(validation_data, validation_y)
-    results = dict(zip(model.metrics_names,results))
+    TRAIN_ACCURACY.append(results_train['accuracy'])
+    TRAIN_LOSS.append(results_train['loss'])
+    VALIDATION_ACCURACY.append(results_val['accuracy'])
+    VALIDATION_LOSS.append(results_val['loss'])
 
-    VALIDATION_ACCURACY.append(results['accuracy'])
-    VALIDATION_LOSS.append(results['loss'])
-
-    tensorflow.keras.backend.clear_session()
+    #tensorflow.keras.backend.clear_session()
     fold_var += 1
 
-model1_performance = pd.DataFrame({'fold':range(0,25),'val_acc':VALIDATION_ACCURACY, 'val_loss':VALIDATION_LOSS})
+model1_performance = pd.DataFrame({'fold':range(0,25),'train_acc':TRAIN_ACCURACY,'train_loss':TRAIN_LOSS,'val_acc':VALIDATION_ACCURACY, 'val_loss':VALIDATION_LOSS})
 model1_performance.to_csv(os.path.join(dir, 'classification/dep_classification/models_performance/model1_performance.csv'),index=False)
-
-#Select and retrieve best model (with min loss)
-best_idx = model1_performance[['val_loss']].idxmin() """
 
 #------------------------ Fit and evaluate best model -------------------------#
 #Fit
@@ -193,59 +209,7 @@ yhat_valid = list(map(lambda x: 1 if x>0.5 else 0, valid_pred))
 f1_train = f1_score(y_train_1, yhat_train, average='macro') #Macro needed with imbalanced classes 
 f1_test = f1_score(y_train_2, yhat_valid, average='macro')
 #f1_train = 1.0 
-#f1_test = 0.78
+#f1_test = 0.35
 
 #------------------- Save model ----------------------#
-best_model.save(os.path.join(dir, 'classification/dep_classification/trained_models/models/model1.h5'))
-
-
-
-#---------------------- Confusion matrix ----------------- #
-from sklearn.metrics import confusion_matrix
-import numpy as np
-import matplotlib.pyplot as plt 
-import itertools
-
-def plot_confusion_matrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues,
-                          verbose=False):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        if verbose:
-            print("Normalized confusion matrix")
-    else:
-        if verbose:
-            print('Confusion matrix, without normalization')
-    if verbose:
-        print(cm)
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes, rotation=45)
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-    plt.tight_layout()
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    #plt.rcParams["figure.figsize"] = [4, 4]
-    plt.savefig('CM_MobileNet_Best.pdf', bbox_inches = 'tight')
-    plt.show() 
-
-yhat = test_pred.argmax(axis=-1)  
-true = y_test
-cm=confusion_matrix(yhat, true)
-classes=["Control","Patient"]
-plot_confusion_matrix(cm_test, classes, normalize=True, cmap=plt.cm.Blues)
-
+best_model.save(os.path.join(dir, 'classification/dep_classification/trained_models/models/model1_random.h5'))

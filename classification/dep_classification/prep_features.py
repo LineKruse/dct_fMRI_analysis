@@ -123,6 +123,172 @@ vec_df.to_csv('/users/line/dct_fMRI_analysis/classification/dep_classification/f
 
 
 ###########################################################################################################
+#              Text sequences for LSTM - encoded in (stim+response) pairs with Tokenizer                  #
+###########################################################################################################
+
+#Create text representations for each subject 
+dir = os.getcwd()
+path = os.path.join(dir,'classification/dep_classification/features_dfs/raw_responses.csv')
+raw_resp = pd.read_csv(path, index_col=False)
+
+def generateList(lst1, lst2):
+    return [sub[item] for item in range(len(lst2))
+                      for sub in [lst1, lst2]]
+
+text_df = pd.DataFrame(columns=np.arange(0,586))
+columns = text_df.columns
+for i in range(0, raw_resp.shape[0]):
+    print(i)
+    l1 = [str(col) for col in raw_resp.loc[:,:'loan'].columns]
+    l2 = [str(resp) for resp in raw_resp.loc[:,:'loan'].iloc[i,:]]
+    text = generateList(l2, l1)
+    #text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
+    #text = [" ".join(text)]
+    zipped = zip(columns, text)
+    output_dict = dict(zipped)
+    text_df = text_df.append(output_dict, ignore_index=True)
+
+text_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index=False)
+
+#Define each timestep to include stim + response 
+dir = os.getcwd()
+text_df = pd.read_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index_col=False)
+text_df.isna().sum().sum() #39 nan 
+
+#Fill nan with random 
+import random
+while(text_df.isna().sum().sum()!=0):
+    text_df.fillna(random.choice(['this','that']),inplace=True,limit=1)
+text_df.isna().sum().sum() #0 nan 
+
+seq_list = []
+for i in range(0, text_df.shape[0]):
+   text = [str(w) for w in text_df.iloc[i,:]]
+   #text = ' '.join(text)
+   text = [' '.join(text[ii:ii+2]) for ii in np.arange(0,586,2)]
+   seq_list.append(text)
+
+#Integer encode text sequences 
+t = Tokenizer()
+t.fit_on_texts(seq_list)
+seq_encoded = t.texts_to_sequences(seq_list)
+seq_encoded_df = pd.DataFrame(seq_encoded)
+#seq_encoded_df.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_encoded_responses.csv'), index=False)
+
+#Save dictionary 
+import pickle 
+dir = os.getcwd()
+word_to_index_dict = t.index_word
+f = open(os.path.join(dir,'classification/dep_classification/features_dfs/mod1_feature_enc_dict.pkl'),'wb')
+pickle.dump([word_to_index_dict], f)
+f.close()
+
+
+#Test that I can backtrace features 
+true = seq_list[0]
+enc = seq_encoded_df.iloc[0,:]
+recoded = [word_to_index_dict[w] for w in enc]
+print(true[0:10])
+print(enc[0:10])
+
+###########################################################################################################
+#                                     Augmentation of text sequences                                      #
+###########################################################################################################
+
+text_df = pd.read_csv(os.path.join(dir,'classification/dep_classification/features_dfs/text_seq_responses.csv'), index_col=False)
+
+
+#Randomly sample 15 sequences for each subject of different lengths 
+#So that we get 15 samples from each subject instead of 1 - more training data 
+#Sampled with no overlap 
+from random import randint
+def rand_parts(seq, n, l=randint(0,30)):
+    """
+    return n random non-overlapping partitions each of length l.
+    If n * l > len(seq) raise error.
+    """
+    result = []
+    left_to_do = n
+    while left_to_do>0: 
+        random_length = randint(0,40)
+        random_index = randint(0, (len(seq)-random_length))
+        subseq = seq[random_index:(random_index+random_length)]
+        result.append(subseq)
+        seq = [el for el in seq if el not in subseq]
+        left_to_do = left_to_do-1
+    return result
+
+sub1 = []
+sub2 = []
+sub3 = []
+sub4 = []
+sub5 = []
+sub6 = []
+sub7 = []
+sub8 = []
+sub9 = []
+sub10 = []
+
+for i in range(0, len(input)): 
+    seq = input[i,:,:]
+    subseqs = rand_parts(seq,10)
+    sub1.append(subseqs[0])
+    sub2.append(subseqs[1])
+    sub3.append(subseqs[2])
+    sub4.append(subseqs[3])
+    sub5.append(subseqs[4])
+    sub6.append(subseqs[5])
+    sub7.append(subseqs[6])
+    sub8.append(subseqs[7])
+    sub9.append(subseqs[8])
+    sub10.append(subseqs[9])
+
+#Create train and test set (ensuring that subsequences from each subject don't end in both train and test)
+idx1 = range(0,len(input))
+idx_train, idx_test, y_train, y_test = train_test_split(idx1, labels,
+                                                    stratify = labels,
+                                                    test_size=0.3,
+                                                    random_state=42)
+
+sub1_train = [sub1[i] for i in range(0, len(sub1)) if i in idx_train]
+sub1_test = [sub1[i] for i in range(0, len(sub1)) if i in idx_test]
+sub2_train = [sub2[i] for i in range(0, len(sub2)) if i in idx_train]
+sub2_test = [sub2[i] for i in range(0, len(sub2)) if i in idx_test]
+sub3_train = [sub3[i] for i in range(0, len(sub3)) if i in idx_train]
+sub3_test = [sub3[i] for i in range(0, len(sub3)) if i in idx_test]
+sub4_train = [sub4[i] for i in range(0, len(sub4)) if i in idx_train]
+sub4_test = [sub4[i] for i in range(0, len(sub4)) if i in idx_test]
+sub5_train = [sub5[i] for i in range(0, len(sub5)) if i in idx_train]
+sub5_test = [sub5[i] for i in range(0, len(sub5)) if i in idx_test]
+sub6_train = [sub6[i] for i in range(0, len(sub6)) if i in idx_train]
+sub6_test = [sub6[i] for i in range(0, len(sub6)) if i in idx_test]
+sub7_train = [sub7[i] for i in range(0, len(sub7)) if i in idx_train]
+sub7_test = [sub7[i] for i in range(0, len(sub7)) if i in idx_test]
+sub8_train = [sub8[i] for i in range(0, len(sub8)) if i in idx_train]
+sub8_test = [sub8[i] for i in range(0, len(sub8)) if i in idx_test]
+sub9_train = [sub9[i] for i in range(0, len(sub9)) if i in idx_train]
+sub9_test = [sub9[i] for i in range(0, len(sub9)) if i in idx_test]
+sub10_train = [sub10[i] for i in range(0, len(sub10)) if i in idx_train]
+sub10_test = [sub10[i] for i in range(0, len(sub10)) if i in idx_test]
+
+sub_train = list(itertools.chain(sub1_train, sub2_train, sub3_train, sub4_train, sub5_train, sub6_train, sub7_train, sub8_train, sub9_train, sub10_train)) 
+sub_test = list(itertools.chain(sub1_test, sub2_test, sub3_test, sub4_test, sub5_test, sub6_test, sub7_test, sub8_test, sub9_test, sub10_test))
+#Pad sequences so get same length 
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+sub_train_padded = pad_sequences(sub_train, padding='post')
+sub_test_padded = pad_sequences(sub_test, padding='post')
+
+#Create dfs to save 
+aug_padded_train = pd.DataFrame(sub_train_padded[:,:,0])
+aug_padded_train['label'] = [lab for lab in y_train for i in range(0,10)]
+aug_padded_train.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/aug_padded_train.csv'))
+
+aug_padded_test = pd.DataFrame(sub_test_padded[:,:,0])
+aug_padded_test['label'] = [lab for lab in y_test for i in range(0,10)]
+aug_padded_test.to_csv(os.path.join(dir,'classification/dep_classification/features_dfs/aug_padded_test.csv'))
+
+
+###########################################################################################################
 #                              Transformer (BERT) based feature representations                           #
 ###########################################################################################################
 import pandas as pd
@@ -253,3 +419,6 @@ df_cm = pd.DataFrame(array, index = ['patient','control'],
 plt.figure(figsize = (10,7))
 sn.heatmap(df_cm, annot=True)
 plt.savefig('/users/line/dct_fMRI_analysis/classification/dep_classification/output/group_confMat.png')
+
+
+

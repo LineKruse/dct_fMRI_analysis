@@ -111,19 +111,21 @@ best_l2 = best_hp[0].values['l2'] #0.06
 #as they already need to be run several times for training. Rather, input a validation_data= argument to the 
 #.fit() function that trains the model. 
 
-""" def get_model_name(k):
+def get_model_name(k):
     return 'model_'+str(k)+'.h5'
 
 VALIDATION_ACCURACY = []
 VALIDATION_LOSS = []
+TRAIN_ACCURACY = []
+TRAIN_LOSS = []
 
-save_dir = os.path.join(dir,'saved_models/')
 fold_var = 1
 cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=42)
 epochs = 100
 Y=y_train
 
 for train_index, val_index in cv.split(np.zeros(len(Y)),Y):
+    print(f'----------------Running fold {fold_var}---------------')
     training_data = X_train[train_index]
     validation_data = X_train[val_index]
 
@@ -147,35 +149,35 @@ for train_index, val_index in cv.split(np.zeros(len(Y)),Y):
     model.build() #builds and compiles 
 
     # CREATE CALLBACKS
-    checkpoint = tensorflow.keras.callbacks.ModelCheckpoint(save_dir+get_model_name(fold_var), 
-                            monitor='val_accuracy', verbose=1, 
-                            save_best_only=True, mode='max')
-    callbacks_list = [checkpoint]
+    #checkpoint = tensorflow.keras.callbacks.ModelCheckpoint(save_dir+get_model_name(fold_var), 
+    #                        monitor='val_accuracy', verbose=1, 
+    #                        save_best_only=True, mode='max')
+    #callbacks_list = [checkpoint]
     # There can be other callbacks, but just showing one because it involves the model name
     # This saves the best model
     # FIT THE MODEL
     history = model.fit(training_data, training_y,
                 epochs=epochs,
-                callbacks=callbacks_list,
+                #callbacks=callbacks_list,
                 validation_data=(validation_data, validation_y))
 
     # LOAD BEST MODEL to evaluate the performance of the model
-    model.load_weights(os.path.join("saved_models/model_"+str(fold_var)+".h5"))
+    #model.load_weights(os.path.join("saved_models/model_"+str(fold_var)+".h5"))
+    results_train = model.evaluate(training_data, training_y)
+    results_train = dict(zip(model.metrics_names, results_train))
+    results_val = model.evaluate(validation_data, validation_y)
+    results_val = dict(zip(model.metrics_names,results_val))
 
-    results = model.evaluate(validation_data, validation_y)
-    results = dict(zip(model.metrics_names,results))
+    TRAIN_ACCURACY.append(results_train['accuracy'])
+    TRAIN_LOSS.append(results_train['loss'])
+    VALIDATION_ACCURACY.append(results_val['accuracy'])
+    VALIDATION_LOSS.append(results_val['loss'])
 
-    VALIDATION_ACCURACY.append(results['accuracy'])
-    VALIDATION_LOSS.append(results['loss'])
-
-    tensorflow.keras.backend.clear_session()
+    #tensorflow.keras.backend.clear_session()
     fold_var += 1
 
-model1_performance = pd.DataFrame({'fold':range(0,25),'val_acc':VALIDATION_ACCURACY, 'val_loss':VALIDATION_LOSS})
+model1_performance = pd.DataFrame({'fold':range(0,25),'train_acc':TRAIN_ACCURACY,'train_loss':TRAIN_LOSS,'val_acc':VALIDATION_ACCURACY, 'val_loss':VALIDATION_LOSS})
 model1_performance.to_csv(os.path.join(dir, 'classification/dep_classification/models_performance/model1_performance.csv'),index=False)
-
-#Select and retrieve best model (with min loss)
-best_idx = model1_performance[['val_loss']].idxmin() """
 
 #------------------------ Fit and evaluate best model -------------------------#
 #Fit
@@ -199,53 +201,117 @@ f1_test = f1_score(y_train_2, yhat_valid, average='macro')
 best_model.save(os.path.join(dir, 'classification/dep_classification/trained_models/models/model1.h5'))
 
 
+#--------------- Compute feature importance --------------# 
+import tqdm
 
-#---------------------- Confusion matrix ----------------- #
-from sklearn.metrics import confusion_matrix
-import numpy as np
-import matplotlib.pyplot as plt 
-import itertools
+# detect and init the TPU
+#tpu = tf.distribute.cluster_resolver.TPUClusterResolver.connect()
 
-def plot_confusion_matrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues,
-                          verbose=False):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        if verbose:
-            print("Normalized confusion matrix")
-    else:
-        if verbose:
-            print('Confusion matrix, without normalization')
-    if verbose:
-        print(cm)
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes, rotation=45)
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-    plt.tight_layout()
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    #plt.rcParams["figure.figsize"] = [4, 4]
-    plt.savefig('CM_MobileNet_Best.pdf', bbox_inches = 'tight')
-    plt.show() 
+# instantiate a distribution strategy
+#tpu_strategy = tf.distribute.experimental.TPUStrategy(tpu)
 
-yhat = test_pred.argmax(axis=-1)  
-true = y_test
-cm=confusion_matrix(yhat, true)
-classes=["Control","Patient"]
-plot_confusion_matrix(cm_test, classes, normalize=True, cmap=plt.cm.Blues)
+# GET GPU STRATEGY
+from tensorflow import keras
+import matplotlib as plt 
+gpu_strategy = tensorflow.distribute.get_strategy()
+
+X = X_train
+y = y_train
+
+EPOCH = 300
+NUM_FOLDS = 5
+COLS = X.shape[1]
+TRAIN_MODEL=True 
+INFER_TEST=False 
+COMPUTE_LSTM_IMPORTANCE=True
+ONE_FOLD_ONLY=False
+
+file_name = 'model1_feature_importance_trainTrue'
+
+with gpu_strategy.scope():
+    kf = cv
+    test_preds = []
+    for fold, (train_idx, test_idx) in enumerate(kf.split(X, y)):
+        #keras.clear_session()
+        
+        print('-'*15, '>', f'Fold {fold+1}', '<', '-'*15)
+        X_train, X_valid = X[train_idx], X[test_idx]
+        y_train, y_valid = y[train_idx], y[test_idx]
+        
+
+        checkpoint_filepath = f"folds{fold}.hdf5"
+        if TRAIN_MODEL:
+            tuner = keras_tuner.RandomSearch(
+                hypermodel=build_model,
+                objective="val_accuracy",
+                max_trials=3,
+                executions_per_trial=2,
+                overwrite=False,
+                directory=os.path.join(dir), 
+                project_name='lstm_hyperparam_tuning'
+            )
+
+            #Extract and build best model 
+            models = tuner.get_best_models(num_models=1)
+            model = models[0]
+            model.build() #builds and compiles 
+
+            model.fit(X_train, y_train, validation_data=(X_valid, y_valid), epochs=EPOCH)
+            
+        else:
+            model = keras.models.load_model(os.path.join(dir, 'classification/dep_classification/trained_models/models/model1.h5'))
+
+        if INFER_TEST:
+            print(' Predicting test data...')
+            test_preds.append(model.predict(X_test,verbose=0).squeeze().reshape(-1, 1).squeeze())
+                    
+        if COMPUTE_LSTM_IMPORTANCE:
+            results = []
+            print(' Computing LSTM feature importance...')
+            
+            # COMPUTE BASELINE (NO SHUFFLE)
+            oof_preds = model.predict(X_valid, verbose=0).squeeze() 
+            baseline_mae = np.mean(np.abs( oof_preds-y_valid ))
+            results.append({'feature':'BASELINE','mae':baseline_mae})           
+
+            for k in tqdm.tqdm(range(0,COLS)):
+                
+                # SHUFFLE FEATURE K
+                save_col = X_valid[:,k,:].copy()
+                np.random.shuffle(X_valid[:,k,:])
+                        
+                # COMPUTE OOF MAE WITH FEATURE K SHUFFLED
+                oof_preds = model.predict(X_valid, verbose=0).squeeze() 
+                mae = np.mean(np.abs( oof_preds-y_valid ))
+                results.append({'feature':k,'mae':mae})
+                X_valid[:,k,:] = save_col
+         
+            # DISPLAY LSTM FEATURE IMPORTANCE
+            df = pd.DataFrame(results)
+            df = df.sort_values('mae')
+            plt.figure(figsize=(10,20))
+            plt.barh(np.arange(COLS+1),df.mae)
+            plt.yticks(np.arange(COLS+1),df.feature.values)
+            plt.title('LSTM Feature Importance',size=16)
+            plt.ylim((-1,COLS+1))
+            plt.plot([baseline_mae,baseline_mae],[-1,COLS+1], '--', color='orange',
+                     label=f'Baseline OOF\nMAE={baseline_mae:.3f}')
+            plt.xlabel(f'Fold {fold+1} OOF MAE with feature permuted',size=14)
+            plt.ylabel('Feature',size=14)
+            plt.legend()
+            #plt.show()
+            plt.savefig(os.path.join(dir,f'classification/dep_classification/models_performance/{file_name}.png'))
+                               
+            # SAVE LSTM FEATURE IMPORTANCE
+            df = df.sort_values('mae',ascending=False)
+            df['fold'] = fold
+            if fold==0: 
+                df_out = df
+            else: 
+                df_out = pd.concat((df_out, df))
+                               
+        # ONLY DO ONE FOLD
+        if ONE_FOLD_ONLY: break
+        df_out.to_csv(os.path.join(dir,f'classification/dep_classification/models_performance/{file_name}.csv'), index=False)
+
 
