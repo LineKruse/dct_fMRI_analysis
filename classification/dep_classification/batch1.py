@@ -175,7 +175,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y,
 ###########################################################################################################
 #                                              Classification pipeline                                    #
 ###########################################################################################################
-#Loop through encoders, loop through models, run models 
+#Loop through encoders, fit and evaluate models 
 
 for i in range(0, len(encoder_list)):
     enc = encoder_list[i]
@@ -299,9 +299,6 @@ for i in range(0, len(encoder_list)):
         X_test_tf_fs = X_test_tf[[c for c in X_test_tf.columns if c in feature_names_list]]
 
         #------------------ Gridsearch parameter optimization-----------------------#
-        # Defining penalties and value of inverse of regurilization strength
-        # smaller values of C specify stronger regurilization.
-        #also define l1ratio in case elasticnet is chosen 
 
         #Params for LR
         LR_params = [{
@@ -423,8 +420,8 @@ for i in range(0, len(encoder_list)):
         grid_best_model = grid_best_model.fit(X_train_tf_fs, y_train)
         grid_train_score = grid_best_model.score(X_train_tf_fs, y_train)
         grid_train_auc = roc_auc_score(y_train, grid_best_model.predict(X_train_tf_fs))
-        grid_test_score = grid_best_model.score(X_test_tf_fs, y_train)
-        grid_test_auc = roc_auc_score(y_train, grid_best_model.predict(X_test_tf_fs))
+        grid_test_score = grid_best_model.score(X_test_tf_fs, y_test)
+        grid_test_auc = roc_auc_score(y_test, grid_best_model.predict(X_test_tf_fs))
         
         boost = boost.fit(X_train_tf_fs, y_train)
         boost_train_score = boost.score(X_train_tf_fs, y_train)
